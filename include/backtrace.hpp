@@ -85,36 +85,10 @@ class Backtrace
 ostream& operator<<(ostream& os, Backtrace& bt)
 {
     pair<string,INT32> *t;
-    INT32 i;
-
     t = bt.GetTrace();
-
-    os << "{" << endl;
-
-    for (i = 0; i < maxDepth - 1; i++)
-    {
-        // If PIN_GetSourceLocation failed to map the IP to a 
-        // file + line number
-        //
-        if (t[i].first == "")
-        {
-            os << "\t\t\t\t\"" << i << "\" : \"\"," << endl;
-        }
-        else {
-            os << "\t\t\t\t\"" << i << "\" : \"" << t[i].first << ":" 
-                << t[i].second << "\"," << endl;
-        }
+    for (int i = 0; i < maxDepth && t[i].second != 0; i++) {
+        os << "\t" << t[i].first << ":" << t[i].second << std::endl;
     }
-
-    if (t[i].first == "")
-    {
-        os << "\t\t\t\t\"" << i << "\" : \"\"" << endl << "\t\t\t}";
-    }
-    else {
-        os << "\t\t\t\t\"" << i << "\" : \"" << t[i].first << ":" 
-            << t[i].second << "\"" << endl << "\t\t\t}";
-    }
-
     return os;
 }
 

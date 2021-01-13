@@ -40,8 +40,8 @@ VOID ThreadFini(THREADID threadId, const CONTEXT *ctxt, INT32 code, VOID* v) {
 //
 VOID MallocBefore(THREADID threadId, CONTEXT *ctxt, ADDRINT size) {
     MyTLS *tls = static_cast<MyTLS*>(PIN_GetThreadData(tls_key, threadId));
-    // threadCache->second.SetTrace(ctxt);
     tls->_cachedSize = size;
+    tls->_cachedBacktrace.SetTrace(ctxt);
 }
 
 VOID MallocAfter(THREADID threadId, ADDRINT retVal) {
@@ -52,15 +52,13 @@ VOID MallocAfter(THREADID threadId, ADDRINT retVal) {
     }
 
     MyTLS *tls = static_cast<MyTLS*>(PIN_GetThreadData(tls_key, threadId));
-    // UINT32 size = threadCache->first;
-    // Backtrace b = threadCache->second;
     manager.InsertObject(retVal, tls->_cachedSize, tls->_cachedBacktrace, threadId);
 }
 
 VOID FreeBefore(THREADID threadId, CONTEXT *ctxt, ADDRINT ptr) {
     MyTLS *tls = static_cast<MyTLS*>(PIN_GetThreadData(tls_key, threadId));
     tls->_cachedPtr = (void *) ptr;
-    // tls->_cachedBacktrace.SetTrace(ctxt);
+    tls->_cachedBacktrace.SetTrace(ctxt);
 }
 
 // We must separate FreeBefore and FreeAfter to avoid considering any metadata
@@ -77,8 +75,10 @@ VOID ReadsMem(THREADID threadId, ADDRINT addrRead, UINT32 readSize) {
         return;
     }
     PIN_GetLock(&outputLock, threadId);
-    std::cout << "Read " << readSize << " byte(s) at address <" << std::hex << 
-        d->addr << std::dec << "+" << addrRead - d->addr << ">" << std::endl;
+    std::cout << "Thread " << threadId << " read " << readSize << " byte(s) at address <" << std::hex << 
+        d->_addr << std::dec << "+" << addrRead - d->_addr << ">:" << std::endl << "\tAllocated by thread " << 
+        d->_mallocThread << " @" << std::endl << d->_mallocTrace << "\tFreed by thread " << 
+        d->_freeThread << " @" << std::endl << d->_freeTrace;
     PIN_ReleaseLock(&outputLock);
 }
 
@@ -88,8 +88,10 @@ VOID WritesMem(THREADID threadId, ADDRINT addrWritten, UINT32 writeSize) {
         return;
     }
     PIN_GetLock(&outputLock, threadId);
-    std::cout << "Wrote " << writeSize << " byte(s) at address <" << std::hex << 
-        d->addr << std::dec << "+" << addrWritten - d->addr << ">" << std::endl;
+    std::cout << "Thread " << threadId << " wrote " << writeSize << " byte(s) at address <" << std::hex << 
+        d->_addr << std::dec << "+" << addrWritten - d->_addr << ">:" << std::endl << "\tAllocated by thread " << 
+        d->_mallocThread << " @" << std::endl << d->_mallocTrace << "\tFreed by thread " << 
+        d->_freeThread << " @" << std::endl << d->_freeTrace;
     PIN_ReleaseLock(&outputLock);
 }
 

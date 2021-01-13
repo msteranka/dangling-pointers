@@ -6,6 +6,7 @@ Checks for dangling pointers
 
 In src/, build with
 
+    $ mkdir obj/
     $ make PIN_ROOT=</path/to/Pin> obj/dangling.so
 
 Run with
