@@ -13,3 +13,6 @@ Run with
 
     $ </path/to/Pin> -t obj/dangling.so -- </path/to/executable> <executable_args>
 
+Print additional information including backtraces with -v option:
+
+    $ </path/to/Pin> -t obj/dangling.so -v 1 -- </path/to/executable> <executable_args>

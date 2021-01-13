@@ -11,12 +11,20 @@
 #include "objectmanager.hpp"
 #include "mytls.hpp"
 
-#ifdef TARGET_MAC
-#define MALLOC "_malloc"
-#define FREE "_free"
+#if defined(_MSC_VER)
+# define LIKELY(x) (x)
+# define UNLIKELY(x) (x)
 #else
-#define MALLOC "malloc"
-#define FREE "free"
+# define LIKELY(x) __builtin_expect(!!(x), 1)
+# define UNLIKELY(x) __builtin_expect(!!(x), 0)
+#endif // _MSC_VER
+
+#if defined(TARGET_MAC)
+# define MALLOC "_malloc"
+# define FREE "_free"
+#else
+# define MALLOC "malloc"
+# define FREE "free"
 #endif // TARGET_MAC
 
 using namespace std;
@@ -24,6 +32,11 @@ using namespace std;
 static ObjectManager manager;
 static TLS_KEY tls_key = INVALID_TLS_KEY; // Thread Local Storage
 static PIN_LOCK outputLock;
+
+namespace Params {
+    static const std::string defaultIsVerbose = "0";
+    static BOOL isVerbose;
+};
 
 VOID ThreadStart(THREADID threadId, CONTEXT *ctxt, INT32 flags, VOID* v) {
     MyTLS *tls = new MyTLS;
@@ -69,30 +82,31 @@ VOID FreeAfter(THREADID threadId) {
     manager.DeleteObject((ADDRINT) tls->_cachedPtr, tls->_cachedBacktrace, threadId);
 }
 
+VOID PrintUseAfterFree(ObjectData *d, THREADID accessingThread, ADDRINT addrAccessed, UINT32 accessSize) {
+    PIN_GetLock(&outputLock, accessingThread);
+    std::cout << "Thread " << accessingThread << " accessed " << accessSize << " byte(s) at address <" << std::hex << 
+        d->_addr << std::dec << "+" << addrAccessed - d->_addr << ">" << std::endl;
+    if (Params::isVerbose) {
+        std::cout << "\tAllocated by thread " << d->_mallocThread << " @" << std::endl << d->_mallocTrace << 
+            "\tFreed by thread " << d->_freeThread << " @" << std::endl << d->_freeTrace;
+    }
+    PIN_ReleaseLock(&outputLock);
+}
+
 VOID ReadsMem(THREADID threadId, ADDRINT addrRead, UINT32 readSize) {
     ObjectData *d = manager.IsUseAfterFree(addrRead, readSize, threadId);
-    if (d == nullptr) {
+    if (LIKELY(!d)) { // If this is a valid read
         return;
     }
-    PIN_GetLock(&outputLock, threadId);
-    std::cout << "Thread " << threadId << " read " << readSize << " byte(s) at address <" << std::hex << 
-        d->_addr << std::dec << "+" << addrRead - d->_addr << ">:" << std::endl << "\tAllocated by thread " << 
-        d->_mallocThread << " @" << std::endl << d->_mallocTrace << "\tFreed by thread " << 
-        d->_freeThread << " @" << std::endl << d->_freeTrace;
-    PIN_ReleaseLock(&outputLock);
+    PrintUseAfterFree(d, threadId, addrRead, readSize);
 }
 
 VOID WritesMem(THREADID threadId, ADDRINT addrWritten, UINT32 writeSize) {
     ObjectData *d = manager.IsUseAfterFree(addrWritten, writeSize, threadId);
-    if (d == nullptr) {
+    if (LIKELY(!d)) { // If this is a valid write
         return;
     }
-    PIN_GetLock(&outputLock, threadId);
-    std::cout << "Thread " << threadId << " wrote " << writeSize << " byte(s) at address <" << std::hex << 
-        d->_addr << std::dec << "+" << addrWritten - d->_addr << ">:" << std::endl << "\tAllocated by thread " << 
-        d->_mallocThread << " @" << std::endl << d->_mallocTrace << "\tFreed by thread " << 
-        d->_freeThread << " @" << std::endl << d->_freeTrace;
-    PIN_ReleaseLock(&outputLock);
+    PrintUseAfterFree(d, threadId, addrWritten, writeSize);
 }
 
 VOID Instruction(INS ins, VOID *v) 
@@ -162,11 +176,15 @@ INT32 Usage() {
 
 int main(int argc, char *argv[]) {
     PIN_InitSymbols();
+    KNOB<UINT32> knobIsVerbose(KNOB_MODE_WRITEONCE, "pintool", "v", 
+                            Params::defaultIsVerbose,
+                            "Dispay additional information including backtraces");
 
     if (PIN_Init(argc, argv))  {
         return Usage();
     }
 
+    Params::isVerbose = knobIsVerbose.Value();
     tls_key = PIN_CreateThreadDataKey(NULL);
     PIN_InitLock(&outputLock);
     if (tls_key == INVALID_TLS_KEY)
