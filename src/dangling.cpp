@@ -55,6 +55,7 @@ VOID MallocBefore(THREADID threadId, CONTEXT *ctxt, ADDRINT size) {
     MyTLS *tls = static_cast<MyTLS*>(PIN_GetThreadData(tls_key, threadId));
     tls->_cachedSize = size;
     tls->_cachedBacktrace.SetTrace(ctxt);
+    tls->_inMalloc = true;
 }
 
 VOID MallocAfter(THREADID threadId, ADDRINT retVal) {
@@ -66,6 +67,7 @@ VOID MallocAfter(THREADID threadId, ADDRINT retVal) {
 
     MyTLS *tls = static_cast<MyTLS*>(PIN_GetThreadData(tls_key, threadId));
     manager.InsertObject(retVal, tls->_cachedSize, tls->_cachedBacktrace, threadId);
+    tls->_inMalloc = false;
 }
 
 VOID FreeBefore(THREADID threadId, CONTEXT *ctxt, ADDRINT ptr) {
@@ -94,7 +96,11 @@ VOID PrintUseAfterFree(ObjectData *d, THREADID accessingThread, ADDRINT addrAcce
 }
 
 VOID ReadsMem(THREADID threadId, ADDRINT addrRead, UINT32 readSize) {
+    MyTLS *tls = static_cast<MyTLS*>(PIN_GetThreadData(tls_key, threadId));
     ObjectData *d = manager.IsUseAfterFree(addrRead, readSize, threadId);
+    if (UNLIKELY(tls->_inMalloc)) { // If this is a read during malloc
+        return;
+    }
     if (LIKELY(!d)) { // If this is a valid read
         return;
     }
@@ -102,7 +108,11 @@ VOID ReadsMem(THREADID threadId, ADDRINT addrRead, UINT32 readSize) {
 }
 
 VOID WritesMem(THREADID threadId, ADDRINT addrWritten, UINT32 writeSize) {
+    MyTLS *tls = static_cast<MyTLS*>(PIN_GetThreadData(tls_key, threadId));
     ObjectData *d = manager.IsUseAfterFree(addrWritten, writeSize, threadId);
+    if (UNLIKELY(tls->_inMalloc)) { // If this is a write during malloc
+        return;
+    }
     if (LIKELY(!d)) { // If this is a valid write
         return;
     }

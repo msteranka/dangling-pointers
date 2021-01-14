@@ -4,11 +4,12 @@
 #include "backtrace.hpp"
 
 struct MyTLS {
-    MyTLS() { }
+    MyTLS() : _inMalloc(false) { }
 
     void *_cachedPtr;
     size_t _cachedSize;
     Backtrace _cachedBacktrace;
+    BOOL _inMalloc;
 };
 
 #endif // __MY_TLS_HPP
