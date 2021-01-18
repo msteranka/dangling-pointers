@@ -86,8 +86,12 @@ ostream& operator<<(ostream& os, Backtrace& bt)
 {
     pair<string,INT32> *t;
     t = bt.GetTrace();
-    for (int i = 0; i < maxDepth && t[i].second != 0; i++) {
-        os << "\t" << t[i].first << ":" << t[i].second << std::endl;
+    for (int i = 0; i < maxDepth; i++) {
+        if (t[i].second == 0) {
+            os << "\t\t(NIL)" << std::endl;
+        } else {
+            os << "\t\t" << t[i].first << ":" << t[i].second << std::endl;
+        }
     }
     return os;
 }
