@@ -84,10 +84,19 @@ VOID FreeAfter(THREADID threadId) {
     manager.DeleteObject((ADDRINT) tls->_cachedPtr, tls->_cachedBacktrace, threadId);
 }
 
-VOID PrintUseAfterFree(ObjectData *d, THREADID accessingThread, ADDRINT addrAccessed, UINT32 accessSize) {
+VOID PrintUseAfterFree(ObjectData *d, THREADID accessingThread, ADDRINT addrAccessed, UINT32 accessSize, const CONTEXT *ctxt) {
+    std::string fileName;
+    INT32 lineNumber;
+    ADDRINT ip;
+
+    ip = PIN_GetContextReg(ctxt, REG_INST_PTR);
+    PIN_LockClient();
+    PIN_GetSourceLocation(ip, nullptr, &lineNumber, &fileName);
+    PIN_UnlockClient();
+
     PIN_GetLock(&outputLock, accessingThread);
     std::cout << "Thread " << accessingThread << " accessed " << accessSize << " byte(s) at address <" << std::hex << 
-        d->_addr << std::dec << "+" << addrAccessed - d->_addr << ">" << std::endl;
+        d->_addr << std::dec << "+" << addrAccessed - d->_addr << ">" << " in " << fileName << ":" << lineNumber << std::endl;
     if (Params::isVerbose) {
         std::cout << "\tAllocated by thread " << d->_mallocThread << " @" << std::endl << d->_mallocTrace << 
             "\tFreed by thread " << d->_freeThread << " @" << std::endl << d->_freeTrace;
@@ -95,7 +104,7 @@ VOID PrintUseAfterFree(ObjectData *d, THREADID accessingThread, ADDRINT addrAcce
     PIN_ReleaseLock(&outputLock);
 }
 
-VOID ReadsMem(THREADID threadId, ADDRINT addrRead, UINT32 readSize) {
+VOID ReadsMem(THREADID threadId, ADDRINT addrRead, UINT32 readSize, const CONTEXT *ctxt) {
     MyTLS *tls = static_cast<MyTLS*>(PIN_GetThreadData(tls_key, threadId));
     ObjectData *d = manager.IsUseAfterFree(addrRead, readSize, threadId);
     if (UNLIKELY(tls->_inMalloc)) { // If this is a read during malloc
@@ -104,10 +113,10 @@ VOID ReadsMem(THREADID threadId, ADDRINT addrRead, UINT32 readSize) {
     if (LIKELY(!d)) { // If this is a valid read
         return;
     }
-    PrintUseAfterFree(d, threadId, addrRead, readSize);
+    PrintUseAfterFree(d, threadId, addrRead, readSize, ctxt);
 }
 
-VOID WritesMem(THREADID threadId, ADDRINT addrWritten, UINT32 writeSize) {
+VOID WritesMem(THREADID threadId, ADDRINT addrWritten, UINT32 writeSize, const CONTEXT *ctxt) {
     MyTLS *tls = static_cast<MyTLS*>(PIN_GetThreadData(tls_key, threadId));
     ObjectData *d = manager.IsUseAfterFree(addrWritten, writeSize, threadId);
     if (UNLIKELY(tls->_inMalloc)) { // If this is a write during malloc
@@ -116,7 +125,7 @@ VOID WritesMem(THREADID threadId, ADDRINT addrWritten, UINT32 writeSize) {
     if (LIKELY(!d)) { // If this is a valid write
         return;
     }
-    PrintUseAfterFree(d, threadId, addrWritten, writeSize);
+    PrintUseAfterFree(d, threadId, addrWritten, writeSize, ctxt);
 }
 
 VOID Instruction(INS ins, VOID *v) 
@@ -129,6 +138,7 @@ VOID Instruction(INS ins, VOID *v)
                         IARG_THREAD_ID,
                         IARG_MEMORYREAD_EA,
                         IARG_MEMORYREAD_SIZE,
+                        IARG_CONST_CONTEXT,
                         IARG_END);
     }
 
@@ -140,6 +150,7 @@ VOID Instruction(INS ins, VOID *v)
                         IARG_THREAD_ID,
                         IARG_MEMORYWRITE_EA,
                         IARG_MEMORYWRITE_SIZE,
+                        IARG_CONST_CONTEXT,
                         IARG_END);
     }
 }
