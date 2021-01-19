@@ -1,19 +1,23 @@
 CXX = clang++
 CXXFLAGS = -std=c++11 -g -gdwarf-2 -rdynamic -pthread
+BIN_DIR = bin/
 
-all: basic reuse struct multithreaded
+all: $(BIN_DIR)basic $(BIN_DIR)reuse $(BIN_DIR)struct $(BIN_DIR)multithreaded $(BIN_DIR)region
 
-basic:
-	$(CXX) $(CXXFLAGS) -o basic basic.cpp
+$(BIN_DIR)basic:
+	$(CXX) $(CXXFLAGS) -o $(BIN_DIR)basic basic.cpp
 
-reuse:
-	$(CXX) $(CXXFLAGS) -o reuse reuse.cpp
+$(BIN_DIR)reuse:
+	$(CXX) $(CXXFLAGS) -o $(BIN_DIR)reuse reuse.cpp
 
-struct:
-	$(CXX) $(CXXFLAGS) -o struct struct.cpp
+$(BIN_DIR)struct:
+	$(CXX) $(CXXFLAGS) -o $(BIN_DIR)struct struct.cpp
 
-multithreaded:
-	$(CXX) $(CXXFLAGS) -o multithreaded multithreaded.cpp
+$(BIN_DIR)multithreaded:
+	$(CXX) $(CXXFLAGS) -o $(BIN_DIR)multithreaded multithreaded.cpp
+
+$(BIN_DIR)region:
+	$(CXX) $(CXXFLAGS) -o $(BIN_DIR)region region.cpp
 
 clean:
-	rm -f basic reuse struct multithreaded
+	rm -f $(BIN_DIR)basic $(BIN_DIR)reuse $(BIN_DIR)struct $(BIN_DIR)multithreaded $(BIN_DIR)region

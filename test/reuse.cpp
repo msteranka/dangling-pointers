@@ -1,12 +1,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <cassert>
-
-void my_memset(void *s, int c, size_t n) {
-    for (int i = 0; i < n; i++) {
-        *((char *) s + i) = c;
-    }
-}
+#include "memset.hpp"
 
 void smallToBig(const unsigned int smallSize, const unsigned int largeSize) {
     char *ptr1 = (char *) malloc(smallSize);

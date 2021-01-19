@@ -1,12 +1,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <thread>
-
-inline void my_memset(void *s, int c, size_t n) {
-    for (int i = 0; i < n; i++) {
-        *((char *) s + i) = c;
-    }
-}
+#include "memset.hpp"
 
 void routine(const int NUM_ITERS, const int OBJ_SIZE) {
     void *ptr;

@@ -33,9 +33,16 @@ static ObjectManager manager;
 static TLS_KEY tls_key = INVALID_TLS_KEY; // Thread Local Storage
 static PIN_LOCK outputLock;
 
+namespace DefaultParams {
+    static const std::string defaultIsVerbose = "0",
+        defaultMallocName = MALLOC, 
+        defaultFreeName = FREE;
+}
+
 namespace Params {
-    static const std::string defaultIsVerbose = "0";
     static BOOL isVerbose;
+    static std::string mallocName;
+    static std::string freeName;
 };
 
 VOID ThreadStart(THREADID threadId, CONTEXT *ctxt, INT32 flags, VOID* v) {
@@ -128,10 +135,8 @@ VOID WritesMem(THREADID threadId, ADDRINT addrWritten, UINT32 writeSize, const C
     PrintUseAfterFree(d, threadId, addrWritten, writeSize, ctxt);
 }
 
-VOID Instruction(INS ins, VOID *v) 
-{
-    if (INS_IsMemoryRead(ins) && !INS_IsStackRead(ins)) 
-    {
+VOID Instruction(INS ins, VOID *v) {
+    if (INS_IsMemoryRead(ins) && !INS_IsStackRead(ins)) {
         // Intercept read instructions that don't read from the stack with ReadsMem
         //
         INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) ReadsMem,
@@ -142,8 +147,7 @@ VOID Instruction(INS ins, VOID *v)
                         IARG_END);
     }
 
-    if (INS_IsMemoryWrite(ins) && !INS_IsStackWrite(ins)) 
-    {
+    if (INS_IsMemoryWrite(ins) && !INS_IsStackWrite(ins)) {
         // Intercept write instructions that don't write to the stack with WritesMem
         //
         INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) WritesMem,
@@ -155,13 +159,11 @@ VOID Instruction(INS ins, VOID *v)
     }
 }
 
-VOID Image(IMG img, VOID *v) 
-{
+VOID Image(IMG img, VOID *v) {
     RTN rtn;
 
-    rtn = RTN_FindByName(img, MALLOC);
-    if (RTN_Valid(rtn)) 
-    {
+    rtn = RTN_FindByName(img, Params::mallocName.c_str());
+    if (RTN_Valid(rtn)) {
         RTN_Open(rtn);
         RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR) MallocBefore, // Hook calls to malloc with MallocBefore
                         IARG_THREAD_ID,
@@ -173,11 +175,12 @@ VOID Image(IMG img, VOID *v)
                         IARG_FUNCRET_EXITPOINT_VALUE, 
                         IARG_END);
         RTN_Close(rtn);
+    } else {
+        // std::cerr << "WARNING: Could not intercept " << Params::mallocName.c_str() << std::endl;
     }
 
-    rtn = RTN_FindByName(img, FREE);
-    if (RTN_Valid(rtn)) 
-    {
+    rtn = RTN_FindByName(img, Params::freeName.c_str());
+    if (RTN_Valid(rtn)) {
         RTN_Open(rtn);
         RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR) FreeBefore, // Hook calls to free with FreeBefore
                         IARG_THREAD_ID,
@@ -188,6 +191,8 @@ VOID Image(IMG img, VOID *v)
                         IARG_THREAD_ID,
                         IARG_END);
         RTN_Close(rtn);
+    } else {
+        // std::cerr << "WARNING Could not intercept " << Params::freeName.c_str() << std::endl;
     }
 }
 
@@ -196,20 +201,28 @@ INT32 Usage() {
 }
 
 int main(int argc, char *argv[]) {
-    PIN_InitSymbols();
     KNOB<UINT32> knobIsVerbose(KNOB_MODE_WRITEONCE, "pintool", "v", 
-                            Params::defaultIsVerbose,
+                            DefaultParams::defaultIsVerbose,
                             "Dispay additional information including backtraces");
+    KNOB<std::string> knobMallocName(KNOB_MODE_WRITEONCE, "pintool", "m", 
+                            DefaultParams::defaultMallocName,
+                            "Name of malloc routine");
+    KNOB<std::string> knobFreeName(KNOB_MODE_WRITEONCE, "pintool", "f", 
+                            DefaultParams::defaultFreeName,
+                            "Name of free routine");
 
+    PIN_InitSymbols();
     if (PIN_Init(argc, argv))  {
         return Usage();
     }
 
     Params::isVerbose = knobIsVerbose.Value();
-    tls_key = PIN_CreateThreadDataKey(NULL);
+    Params::mallocName = knobMallocName.Value();
+    Params::freeName = knobFreeName.Value();
+
     PIN_InitLock(&outputLock);
-    if (tls_key == INVALID_TLS_KEY)
-    {
+    tls_key = PIN_CreateThreadDataKey(NULL);
+    if (tls_key == INVALID_TLS_KEY) {
         cerr << "number of already allocated keys reached the MAX_CLIENT_TLS_KEYS limit" << endl;
         PIN_ExitProcess(1);
     }
