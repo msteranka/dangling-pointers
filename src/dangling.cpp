@@ -6,10 +6,12 @@
 #include <cstdlib>
 #include <string>
 #include <unordered_map>
+#include <sstream>
 #include "objectdata.hpp"
 #include "backtrace.hpp"
 #include "objectmanager.hpp"
 #include "mytls.hpp"
+#include "misc.hpp"
 
 #if defined(_MSC_VER)
 # define LIKELY(x) (x)
@@ -32,17 +34,20 @@ using namespace std;
 static ObjectManager manager;
 static TLS_KEY tls_key = INVALID_TLS_KEY; // Thread Local Storage
 static PIN_LOCK outputLock;
+static std::unordered_map<std::string, UINT32> accessData;
 
 namespace DefaultParams {
     static const std::string defaultIsVerbose = "0",
         defaultMallocName = MALLOC, 
-        defaultFreeName = FREE;
+        defaultFreeName = FREE,
+        defaultTraceFile = "dangling.out";
 }
 
 namespace Params {
     static BOOL isVerbose;
     static std::string mallocName;
     static std::string freeName;
+    static std::ofstream traceFile;
 };
 
 VOID ThreadStart(THREADID threadId, CONTEXT *ctxt, INT32 flags, VOID* v) {
@@ -91,55 +96,37 @@ VOID FreeAfter(THREADID threadId) {
     manager.DeleteObject((ADDRINT) tls->_cachedPtr, tls->_cachedBacktrace, threadId);
 }
 
-VOID PrintUseAfterFree(ObjectData *d, THREADID accessingThread, ADDRINT addrAccessed, UINT32 accessSize, const CONTEXT *ctxt) {
-    std::string fileName;
-    INT32 lineNumber;
-    ADDRINT ip;
-
-    ip = PIN_GetContextReg(ctxt, REG_INST_PTR);
-    PIN_LockClient();
-    PIN_GetSourceLocation(ip, nullptr, &lineNumber, &fileName);
-    PIN_UnlockClient();
-
-    PIN_GetLock(&outputLock, accessingThread);
-    std::cout << "Thread " << accessingThread << " accessed " << accessSize << " byte(s) at address <" << std::hex << 
-        d->_addr << std::dec << "+" << addrAccessed - d->_addr << ">" << " in " << fileName << ":" << lineNumber << std::endl;
-    if (Params::isVerbose) {
-        std::cout << "\tAllocated by thread " << d->_mallocThread << " @" << std::endl << d->_mallocTrace << 
-            "\tFreed by thread " << d->_freeThread << " @" << std::endl << d->_freeTrace;
-    }
-    PIN_ReleaseLock(&outputLock);
-}
-
-VOID ReadsMem(THREADID threadId, ADDRINT addrRead, UINT32 readSize, const CONTEXT *ctxt) {
+VOID MemAccess(THREADID threadId, ADDRINT addrAccessed, UINT32 accessSize, const CONTEXT *ctxt) {
     MyTLS *tls = static_cast<MyTLS*>(PIN_GetThreadData(tls_key, threadId));
-    ObjectData *d = manager.IsUseAfterFree(addrRead, readSize, threadId);
+    ObjectData *d = manager.IsUseAfterFree(addrAccessed, accessSize, threadId);
+    std::ostringstream sourceStream;
+    std::string source;
+
     if (UNLIKELY(tls->_inMalloc)) { // If this is a read during malloc
         return;
     }
     if (LIKELY(!d)) { // If this is a valid read
         return;
     }
-    PrintUseAfterFree(d, threadId, addrRead, readSize, ctxt);
-}
-
-VOID WritesMem(THREADID threadId, ADDRINT addrWritten, UINT32 writeSize, const CONTEXT *ctxt) {
-    MyTLS *tls = static_cast<MyTLS*>(PIN_GetThreadData(tls_key, threadId));
-    ObjectData *d = manager.IsUseAfterFree(addrWritten, writeSize, threadId);
-    if (UNLIKELY(tls->_inMalloc)) { // If this is a write during malloc
-        return;
+    // PrintUseAfterFree(d, threadId, addrAccessed, accessSize, ctxt);
+    // TODO: concurrency?
+    GetSource(sourceStream, ctxt);
+    source = sourceStream.str();
+    if (Params::isVerbose) {
+        PrintUseAfterFree(d, threadId, addrAccessed, accessSize, source, outputLock);
+    } else {
+        if (accessData.find(source) == accessData.end()) {
+            accessData[source] = 0;
+        } 
+        accessData[source]++;
     }
-    if (LIKELY(!d)) { // If this is a valid write
-        return;
-    }
-    PrintUseAfterFree(d, threadId, addrWritten, writeSize, ctxt);
 }
 
 VOID Instruction(INS ins, VOID *v) {
     if (INS_IsMemoryRead(ins) && !INS_IsStackRead(ins)) {
-        // Intercept read instructions that don't read from the stack with ReadsMem
+        // Intercept read instructions that don't read from the stack with MemAccess
         //
-        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) ReadsMem,
+        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) MemAccess,
                         IARG_THREAD_ID,
                         IARG_MEMORYREAD_EA,
                         IARG_MEMORYREAD_SIZE,
@@ -148,9 +135,9 @@ VOID Instruction(INS ins, VOID *v) {
     }
 
     if (INS_IsMemoryWrite(ins) && !INS_IsStackWrite(ins)) {
-        // Intercept write instructions that don't write to the stack with WritesMem
+        // Intercept write instructions that don't write to the stack with MemAccess
         //
-        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) WritesMem,
+        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) MemAccess,
                         IARG_THREAD_ID,
                         IARG_MEMORYWRITE_EA,
                         IARG_MEMORYWRITE_SIZE,
@@ -196,6 +183,12 @@ VOID Image(IMG img, VOID *v) {
     }
 }
 
+VOID Fini(INT32 code, VOID *v) {
+    for (auto it = accessData.begin(); it != accessData.end(); it++) {
+        Params::traceFile << it->second << " use after frees at " << it->first << std::endl;
+    }
+}
+
 INT32 Usage() {
     return EXIT_FAILURE;
 }
@@ -210,6 +203,9 @@ int main(int argc, char *argv[]) {
     KNOB<std::string> knobFreeName(KNOB_MODE_WRITEONCE, "pintool", "f", 
                             DefaultParams::defaultFreeName,
                             "Name of free routine");
+    KNOB<std::string> knobTraceFile(KNOB_MODE_WRITEONCE, "pintool", "o", 
+                            DefaultParams::defaultTraceFile,
+                            "Name of output file");
 
     PIN_InitSymbols();
     if (PIN_Init(argc, argv))  {
@@ -219,6 +215,8 @@ int main(int argc, char *argv[]) {
     Params::isVerbose = knobIsVerbose.Value();
     Params::mallocName = knobMallocName.Value();
     Params::freeName = knobFreeName.Value();
+    Params::traceFile.open(knobTraceFile.Value().c_str());
+    Params::traceFile.setf(ios::showbase);
 
     PIN_InitLock(&outputLock);
     tls_key = PIN_CreateThreadDataKey(NULL);
@@ -231,5 +229,6 @@ int main(int argc, char *argv[]) {
     INS_AddInstrumentFunction(Instruction, 0);
     PIN_AddThreadStartFunction(ThreadStart, 0);
     PIN_AddThreadFiniFunction(ThreadFini, 0);
+	PIN_AddFiniFunction(Fini, 0);
     PIN_StartProgram();
 }
