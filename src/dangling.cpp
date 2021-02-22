@@ -113,7 +113,7 @@ VOID MemAccess(THREADID threadId, ADDRINT addrAccessed, UINT32 accessSize, const
     GetSource(sourceStream, ctxt);
     source = sourceStream.str();
     if (Params::isVerbose) {
-        PrintUseAfterFree(d, threadId, addrAccessed, accessSize, source, outputLock);
+        PrintUseAfterFree(Params::traceFile, d, threadId, addrAccessed, accessSize, source, outputLock);
     } else {
         if (accessData.find(source) == accessData.end()) {
             accessData[source] = 0;
@@ -184,8 +184,10 @@ VOID Image(IMG img, VOID *v) {
 }
 
 VOID Fini(INT32 code, VOID *v) {
-    for (auto it = accessData.begin(); it != accessData.end(); it++) {
-        Params::traceFile << it->second << " use after frees at " << it->first << std::endl;
+    if (!Params::isVerbose) {
+        for (auto it = accessData.begin(); it != accessData.end(); it++) {
+            Params::traceFile << it->second << " use after frees at " << it->first << std::endl;
+        }
     }
 }
 

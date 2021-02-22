@@ -16,3 +16,5 @@ Run with
 Print additional information including backtraces with -v option:
 
     $ </path/to/Pin> -t obj/dangling.so -v 1 -- </path/to/executable> <executable_args>
+
+All output is recorded in a dangling.out file.
